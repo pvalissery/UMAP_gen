@@ -6,72 +6,221 @@
     <!-- Load Plotly.js -->
     <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 20px; background-color: #f4f4f9; }
-        #controls { margin-bottom: 15px; padding: 15px; background: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-        select { padding: 8px; font-size: 16px; border-radius: 4px; border: 1px solid #ccc; width: 250px; }
-        #umap-plot { background: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); padding: 10px; }
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; 
+            margin: 0; 
+            padding: 20px; 
+            background-color: #f4f4f9; 
+            display: flex; 
+            gap: 20px; 
+            height: 100vh;
+            box-sizing: border-box;
+        }
+        #sidebar { 
+            width: 350px; 
+            background: white; 
+            border-radius: 8px; 
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1); 
+            padding: 20px; 
+            overflow-y: auto;
+            flex-shrink: 0;
+        }
+        #main-view { 
+            flex-grow: 1; 
+            background: white; 
+            border-radius: 8px; 
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1); 
+            padding: 10px;
+            display: flex;
+            flex-direction: column;
+        }
+        #umap-plot { flex-grow: 1; width: 100%; }
+        
+        /* Control Panel Styling */
+        .control-group { margin-bottom: 25px; }
+        .control-group h3 { margin: 0 0 10px 0; font-size: 15px; border-bottom: 1px solid #ddd; padding-bottom: 5px; }
+        select { width: 100%; padding: 8px; font-size: 14px; border-radius: 4px; border: 1px solid #ccc; }
+        
+        .toggle-row { 
+            display: flex; 
+            align-items: center; 
+            margin-bottom: 6px; 
+            font-size: 14px;
+        }
+        .toggle-row label { flex-grow: 1; cursor: pointer; margin-left: 8px; }
+        .toggle-row input[type="checkbox"] { cursor: pointer; }
+        .toggle-row input[type="color"] { 
+            width: 24px; 
+            height: 24px; 
+            padding: 0; 
+            border: none; 
+            border-radius: 4px; 
+            cursor: pointer; 
+        }
+        h2 { margin-top: 0; font-size: 20px;}
     </style>
 </head>
 <body>
-    <h2>Plasmodium falciparum 10x Single-Cell Atlas</h2>
-    
-    <div id="controls">
-        <label for="color-select"><strong>Group cells by:</strong> </label>
-        <select id="color-select">
-            <option value="STAGE_LR">Life-Cycle Stage</option>
-            <option value="CLUSTER">Cluster ID</option>
-            <option value="STRAIN">Parasite Strain</option>
-            <option value="DAY">Day of Experiment</option>
-        </select>
+
+    <div id="sidebar">
+        <h2>Atlas Controls</h2>
+        
+        <div class="control-group">
+            <h3>Group Colors By</h3>
+            <select id="color-select">
+                <option value="STAGE_LR">Life-Cycle Stage</option>
+                <option value="STRAIN">Parasite Strain</option>
+                <option value="CLUSTER">Cluster ID</option>
+                <option value="DAY">Day of Experiment</option>
+            </select>
+        </div>
+
+        <div class="control-group">
+            <h3>Stages (Toggle & Color)</h3>
+            <div id="stage-toggles"></div>
+        </div>
+
+        <div class="control-group">
+            <h3>Strains (Toggle & Color)</h3>
+            <div id="strain-toggles"></div>
+        </div>
     </div>
 
-    <div id="umap-plot" style="width: 100%; height: 800px;"></div>
+    <div id="main-view">
+        <h2 style="text-align: center; margin: 10px 0 0 0;">Plasmodium falciparum 10x Single-Cell Atlas</h2>
+        <div id="umap-plot"></div>
+    </div>
 
     <script>
         let atlasData = [];
+        let state = {
+            activeStages: new Set(),
+            activeStrains: new Set(),
+            stageColors: {},
+            strainColors: {}
+        };
 
-        // Fetch the 10x dataset
+        // Standard distinct color palette
+        const colorPalette = [
+            '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', 
+            '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf',
+            '#393b79', '#5254a3', '#6b6ecf', '#9c9ede', '#637939',
+            '#8c6d31', '#bd9e39', '#e7cb94', '#843c39'
+        ];
+
+        // Fetch the JSON dataset
         fetch('p_falciparum_10x_atlas.json')
             .then(res => res.json())
             .then(data => {
                 atlasData = data;
-                renderPlot('STAGE_LR'); // Initial render by stage
                 
-                // Listen for dropdown changes
-                document.getElementById('color-select').addEventListener('change', (e) => {
-                    renderPlot(e.target.value);
-                });
-            })
-            .catch(err => console.error("Error loading JSON file.", err));
+                // Extract unique values dynamically from the JSON
+                const stages = [...new Set(atlasData.map(d => d.STAGE_LR).filter(Boolean))];
+                const strains = [...new Set(atlasData.map(d => d.STRAIN).filter(Boolean))];
 
-        function renderPlot(colorVariable) {
-            const x = atlasData.map(d => d.UMAP_1);
-            const y = atlasData.map(d => d.UMAP_2);
-            const z = atlasData.map(d => d.UMAP_3);
-            
-            // Build the hover tooltip
-            const hoverText = atlasData.map(d => 
-                `<b>Cell ID:</b> ${d.index}<br><b>Stage:</b> ${d.STAGE_LR}<br><b>Strain:</b> ${d.STRAIN}<br><b>Day:</b> ${d.DAY}<br><b>Cluster:</b> ${d.CLUSTER}`
+                // Initialize the active state and assign default colors
+                stages.forEach((s, i) => {
+                    state.activeStages.add(s);
+                    state.stageColors[s] = colorPalette[i % colorPalette.length];
+                });
+
+                strains.forEach((s, i) => {
+                    state.activeStrains.add(s);
+                    // Offset the color index so strains don't look exactly like stages initially
+                    state.strainColors[s] = colorPalette[(i + stages.length) % colorPalette.length];
+                });
+
+                // Build the DOM UI elements
+                buildToggleList('stage-toggles', stages, state.activeStages, state.stageColors, 'stage');
+                buildToggleList('strain-toggles', strains, state.activeStrains, state.strainColors, 'strain');
+
+                // Re-render when the main grouping dropdown changes
+                document.getElementById('color-select').addEventListener('change', renderPlot);
+
+                // Initial render
+                renderPlot();
+            })
+            .catch(err => {
+                console.error("Error loading JSON file.", err);
+                document.getElementById('umap-plot').innerHTML = `<p style="color:red; padding: 20px;">Error loading JSON data. Make sure you are running a local server.</p>`;
+            });
+
+        // Function to build out the checkboxes and color pickers
+        function buildToggleList(containerId, items, activeSet, colorObj, typeName) {
+            const container = document.getElementById(containerId);
+            container.innerHTML = '';
+
+            items.forEach(item => {
+                const row = document.createElement('div');
+                row.className = 'toggle-row';
+
+                // Setup Checkbox
+                const cb = document.createElement('input');
+                cb.type = 'checkbox';
+                cb.id = `cb-${typeName}-${item}`;
+                cb.checked = true;
+                cb.addEventListener('change', (e) => {
+                    if (e.target.checked) activeSet.add(item);
+                    else activeSet.delete(item);
+                    renderPlot();
+                });
+
+                // Setup Label
+                const label = document.createElement('label');
+                label.htmlFor = cb.id;
+                label.innerText = item;
+
+                // Setup Color Picker
+                const cp = document.createElement('input');
+                cp.type = 'color';
+                cp.value = colorObj[item];
+                cp.addEventListener('input', (e) => {
+                    colorObj[item] = e.target.value;
+                    renderPlot(); // Update plot live as color changes
+                });
+
+                row.appendChild(cb);
+                row.appendChild(label);
+                row.appendChild(cp);
+                container.appendChild(row);
+            });
+        }
+
+        // Filter the data array and redraw the Plotly trace
+        function renderPlot() {
+            if (atlasData.length === 0) return;
+
+            const groupVar = document.getElementById('color-select').value;
+
+            // Only plot cells where both the stage and the strain are checked
+            const filteredData = atlasData.filter(d => 
+                state.activeStages.has(d.STAGE_LR) && 
+                state.activeStrains.has(d.STRAIN)
             );
 
-            // Dynamically assign discrete colors based on the chosen category
-            const categories = atlasData.map(d => d[colorVariable]);
-            const uniqueCategories = [...new Set(categories)];
+            const x = filteredData.map(d => d.UMAP_1);
+            const y = filteredData.map(d => d.UMAP_2);
+            const z = filteredData.map(d => d.UMAP_3);
+
+            const hoverText = filteredData.map(d => 
+                `<b>Cell ID:</b> ${d.index}<br><b>Stage:</b> ${d.STAGE_LR}<br><b>Strain:</b>${d.STRAIN}<br><b>Day:</b> ${d.DAY}<br><b>Cluster:</b>${d.CLUSTER}`
+            );
+
+            // Assign marker colors based on the dropdown selection & manual color pickers
+            let pointColors = [];
             
-            // A standard discrete color palette
-            const colorPalette = [
-                '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', 
-                '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf',
-                '#393b79', '#5254a3', '#6b6ecf', '#9c9ede', '#637939'
-            ];
-            
-            // Map each unique category to a specific color
-            const colorMap = {};
-            uniqueCategories.forEach((cat, i) => {
-                colorMap[cat] = colorPalette[i % colorPalette.length];
-            });
-            
-            const pointColors = categories.map(cat => colorMap[cat]);
+            if (groupVar === 'STAGE_LR') {
+                pointColors = filteredData.map(d => state.stageColors[d.STAGE_LR]);
+            } else if (groupVar === 'STRAIN') {
+                pointColors = filteredData.map(d => state.strainColors[d.STRAIN]);
+            } else {
+                // Fallback for Cluster/Day (Generates distinct non-toggleable colors on the fly)
+                const categories = filteredData.map(d => d[groupVar]);
+                const uniqueCat = [...new Set(categories)];
+                const fallbackMap = {};
+                uniqueCat.forEach((cat, i) => fallbackMap[cat] = colorPalette[i % colorPalette.length]);
+                pointColors = categories.map(cat => fallbackMap[cat]);
+            }
 
             const trace = {
                 x: x,
@@ -82,24 +231,25 @@
                 text: hoverText,
                 hoverinfo: 'text',
                 marker: {
-                    size: 2, // Keep size small for 45k points
-                    opacity: 0.7,
+                    size: 2.5,
+                    opacity: 0.8,
                     color: pointColors
                 }
             };
 
             const layout = {
-                title: `3D UMAP grouped by ${document.getElementById('color-select').options[document.getElementById('color-select').selectedIndex].text}`,
+                title: `3D UMAP (Showing ${filteredData.length} cells)`,
                 hovermode: 'closest',
                 scene: {
                     xaxis: { title: 'UMAP 1', zeroline: false },
                     yaxis: { title: 'UMAP 2', zeroline: false },
                     zaxis: { title: 'UMAP 3', zeroline: false }
                 },
-                margin: { l: 0, r: 0, b: 0, t: 50 }
+                margin: { l: 0, r: 0, b: 0, t: 30 }
             };
 
-            Plotly.newPlot('umap-plot', [trace], layout);
+            // Plotly.react is much faster than Plotly.newPlot for updating existing charts
+            Plotly.react('umap-plot', [trace], layout);
         }
     </script>
 </body>
