@@ -2,111 +2,101 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>P. falciparum Atlas</title>
-    <!-- Load Plotly.js for hardware-accelerated rendering -->
+    <title>P. falciparum 10x Atlas (3D)</title>
+    <!-- Load Plotly.js -->
     <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 20px; }
-        #controls { margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-radius: 8px; border: 1px solid #ddd; }
-        select { padding: 8px; font-size: 16px; border-radius: 4px; border: 1px solid #ccc; width: 300px; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 20px; background-color: #f4f4f9; }
+        #controls { margin-bottom: 15px; padding: 15px; background: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        select { padding: 8px; font-size: 16px; border-radius: 4px; border: 1px solid #ccc; width: 250px; }
+        #umap-plot { background: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); padding: 10px; }
     </style>
 </head>
 <body>
-    <h2>Plasmodium falciparum Single-Cell Atlas (Smart-seq2)</h2>
+    <h2>Plasmodium falciparum 10x Single-Cell Atlas</h2>
     
     <div id="controls">
-        <label for="color-select"><strong>Color cells by:</strong> </label>
+        <label for="color-select"><strong>Group cells by:</strong> </label>
         <select id="color-select">
-            <option value="stage">Life-Cycle Stage</option>
-            <!-- Javascript will automatically inject your exported genes here -->
+            <option value="STAGE_LR">Life-Cycle Stage</option>
+            <option value="CLUSTER">Cluster ID</option>
+            <option value="STRAIN">Parasite Strain</option>
+            <option value="DAY">Day of Experiment</option>
         </select>
     </div>
 
-    <div id="umap-plot" style="width: 100%; height: 750px;"></div>
+    <div id="umap-plot" style="width: 100%; height: 800px;"></div>
 
     <script>
         let atlasData = [];
-        let geneDict = {};
 
-        // Fetch both JSON files simultaneously
-        Promise.all([
-            fetch('p_falciparum_atlas.json').then(res => res.json()),
-            fetch('gene_dictionary.json').then(res => res.json())
-        ]).then(([data, dict]) => {
-            atlasData = data;
-            geneDict = dict;
-            
-            setupDropdown();
-            renderPlot('stage'); // Draw the initial plot colored by stage
-            
-            // Re-draw plot when a user selects a new gene from the dropdown
-            document.getElementById('color-select').addEventListener('change', (e) => {
-                renderPlot(e.target.value);
-            });
-        }).catch(err => console.error("Error loading JSON files. Make sure they are in the same folder as index.html", err));
-
-        function setupDropdown() {
-            const select = document.getElementById('color-select');
-            // Identify which columns are genes by filtering out the core metadata
-            const metadataKeys = ['index', 'UMAP_1', 'UMAP_2', 'stage'];
-            const genes = Object.keys(atlasData[0]).filter(k => !metadataKeys.includes(k));
-            
-            genes.forEach(geneId => {
-                // Look up the readable name, fallback to ID if missing
-                const readableName = geneDict[geneId] || geneId; 
-                const option = document.createElement('option');
-                option.value = geneId;
-                option.textContent = `${geneId} (${readableName})`;
-                select.appendChild(option);
-            });
-        }
+        // Fetch the 10x dataset
+        fetch('p_falciparum_10x_atlas.json')
+            .then(res => res.json())
+            .then(data => {
+                atlasData = data;
+                renderPlot('STAGE_LR'); // Initial render by stage
+                
+                // Listen for dropdown changes
+                document.getElementById('color-select').addEventListener('change', (e) => {
+                    renderPlot(e.target.value);
+                });
+            })
+            .catch(err => console.error("Error loading JSON file.", err));
 
         function renderPlot(colorVariable) {
             const x = atlasData.map(d => d.UMAP_1);
             const y = atlasData.map(d => d.UMAP_2);
+            const z = atlasData.map(d => d.UMAP_3);
             
-            // Build the tooltip text for every single cell
+            // Build the hover tooltip
             const hoverText = atlasData.map(d => 
-                `<b>Cell ID:</b> ${d.index}<br><b>Stage:</b> ${d.stage}<br><b>${colorVariable}:</b> ${d[colorVariable]}`
+                `<b>Cell ID:</b> ${d.index}<br><b>Stage:</b> ${d.STAGE_LR}<br><b>Strain:</b> ${d.STRAIN}<br><b>Day:</b> ${d.DAY}<br><b>Cluster:</b> ${d.CLUSTER}`
             );
 
-            let markerConfig = { size: 5, opacity: 0.8 };
-
-            if (colorVariable === 'stage') {
-                // Map specific colors to the different life stages
-                const stages = atlasData.map(d => d.stage);
-                const colorMap = {
-                    'sporozoite': '#1f77b4',
-                    'ring': '#ff7f0e',
-                    'trophozoite': '#2ca02c',
-                    'schizont': '#d62728',
-                    'gametocyte': '#9467bd',
-                    'ookinete': '#8c564b'
-                };
-                markerConfig.color = stages.map(s => colorMap[s] || '#7f7f7f');
-                markerConfig.showscale = false;
-            } else {
-                // If a gene is selected, use a continuous heat map (Viridis colorscale)
-                markerConfig.color = atlasData.map(d => d[colorVariable]);
-                markerConfig.colorscale = 'Viridis';
-                markerConfig.showscale = true;
-            }
+            // Dynamically assign discrete colors based on the chosen category
+            const categories = atlasData.map(d => d[colorVariable]);
+            const uniqueCategories = [...new Set(categories)];
+            
+            // A standard discrete color palette
+            const colorPalette = [
+                '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', 
+                '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf',
+                '#393b79', '#5254a3', '#6b6ecf', '#9c9ede', '#637939'
+            ];
+            
+            // Map each unique category to a specific color
+            const colorMap = {};
+            uniqueCategories.forEach((cat, i) => {
+                colorMap[cat] = colorPalette[i % colorPalette.length];
+            });
+            
+            const pointColors = categories.map(cat => colorMap[cat]);
 
             const trace = {
                 x: x,
                 y: y,
+                z: z,
                 mode: 'markers',
-                type: 'scattergl', // Enforces GPU hardware acceleration
+                type: 'scatter3d', 
                 text: hoverText,
                 hoverinfo: 'text',
-                marker: markerConfig
+                marker: {
+                    size: 2, // Keep size small for 45k points
+                    opacity: 0.7,
+                    color: pointColors
+                }
             };
 
             const layout = {
-                title: colorVariable === 'stage' ? 'UMAP by Life-Cycle Stage' : `UMAP colored by ${colorVariable} Expression`,
+                title: `3D UMAP grouped by ${document.getElementById('color-select').options[document.getElementById('color-select').selectedIndex].text}`,
                 hovermode: 'closest',
-                xaxis: { title: 'UMAP 1', zeroline: false },
-                yaxis: { title: 'UMAP 2', zeroline: false }
+                scene: {
+                    xaxis: { title: 'UMAP 1', zeroline: false },
+                    yaxis: { title: 'UMAP 2', zeroline: false },
+                    zaxis: { title: 'UMAP 3', zeroline: false }
+                },
+                margin: { l: 0, r: 0, b: 0, t: 50 }
             };
 
             Plotly.newPlot('umap-plot', [trace], layout);
