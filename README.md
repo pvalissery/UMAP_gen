@@ -1,6 +1,6 @@
 # Serverless, fast, lightweight 3D UMAP viewer for 10x Single-Cell datasets 
 
-demo: https://pvalissery.github.io/smartseq-map/
+demo: https://pvalissery.github.io/UMAP_gen/
 
 The primary goal of this tool is to provide a fast, lightweight way to visualize high-dimensional datasets, avoiding resource usage and server costs.
 
