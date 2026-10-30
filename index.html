@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>P. falciparum Atlas</title>
+    <!-- Load Plotly.js for hardware-accelerated rendering -->
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 20px; }
+        #controls { margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-radius: 8px; border: 1px solid #ddd; }
+        select { padding: 8px; font-size: 16px; border-radius: 4px; border: 1px solid #ccc; width: 300px; }
+    </style>
+</head>
+<body>
+    <h2>Plasmodium falciparum Single-Cell Atlas (Smart-seq2)</h2>
+    
+    <div id="controls">
+        <label for="color-select"><strong>Color cells by:</strong> </label>
+        <select id="color-select">
+            <option value="stage">Life-Cycle Stage</option>
+            <!-- Javascript will automatically inject your exported genes here -->
+        </select>
+    </div>
+
+    <div id="umap-plot" style="width: 100%; height: 750px;"></div>
+
+    <script>
+        let atlasData = [];
+        let geneDict = {};
+
+        // Fetch both JSON files simultaneously
+        Promise.all([
+            fetch('p_falciparum_atlas.json').then(res => res.json()),
+            fetch('gene_dictionary.json').then(res => res.json())
+        ]).then(([data, dict]) => {
+            atlasData = data;
+            geneDict = dict;
+            
+            setupDropdown();
+            renderPlot('stage'); // Draw the initial plot colored by stage
+            
+            // Re-draw plot when a user selects a new gene from the dropdown
+            document.getElementById('color-select').addEventListener('change', (e) => {
+                renderPlot(e.target.value);
+            });
+        }).catch(err => console.error("Error loading JSON files. Make sure they are in the same folder as index.html", err));
+
+        function setupDropdown() {
+            const select = document.getElementById('color-select');
+            // Identify which columns are genes by filtering out the core metadata
+            const metadataKeys = ['index', 'UMAP_1', 'UMAP_2', 'stage'];
+            const genes = Object.keys(atlasData[0]).filter(k => !metadataKeys.includes(k));
+            
+            genes.forEach(geneId => {
+                // Look up the readable name, fallback to ID if missing
+                const readableName = geneDict[geneId] || geneId; 
+                const option = document.createElement('option');
+                option.value = geneId;
+                option.textContent = `${geneId} (${readableName})`;
+                select.appendChild(option);
+            });
+        }
+
+        function renderPlot(colorVariable) {
+            const x = atlasData.map(d => d.UMAP_1);
+            const y = atlasData.map(d => d.UMAP_2);
+            
+            // Build the tooltip text for every single cell
+            const hoverText = atlasData.map(d => 
+                `<b>Cell ID:</b> ${d.index}<br><b>Stage:</b> ${d.stage}<br><b>${colorVariable}:</b> ${d[colorVariable]}`
+            );
+
+            let markerConfig = { size: 5, opacity: 0.8 };
+
+            if (colorVariable === 'stage') {
+                // Map specific colors to the different life stages
+                const stages = atlasData.map(d => d.stage);
+                const colorMap = {
+                    'sporozoite': '#1f77b4',
+                    'ring': '#ff7f0e',
+                    'trophozoite': '#2ca02c',
+                    'schizont': '#d62728',
+                    'gametocyte': '#9467bd',
+                    'ookinete': '#8c564b'
+                };
+                markerConfig.color = stages.map(s => colorMap[s] || '#7f7f7f');
+                markerConfig.showscale = false;
+            } else {
+                // If a gene is selected, use a continuous heat map (Viridis colorscale)
+                markerConfig.color = atlasData.map(d => d[colorVariable]);
+                markerConfig.colorscale = 'Viridis';
+                markerConfig.showscale = true;
+            }
+
+            const trace = {
+                x: x,
+                y: y,
+                mode: 'markers',
+                type: 'scattergl', // Enforces GPU hardware acceleration
+                text: hoverText,
+                hoverinfo: 'text',
+                marker: markerConfig
+            };
+
+            const layout = {
+                title: colorVariable === 'stage' ? 'UMAP by Life-Cycle Stage' : `UMAP colored by ${colorVariable} Expression`,
+                hovermode: 'closest',
+                xaxis: { title: 'UMAP 1', zeroline: false },
+                yaxis: { title: 'UMAP 2', zeroline: false }
+            };
+
+            Plotly.newPlot('umap-plot', [trace], layout);
+        }
+    </script>
+</body>
+</html>
